@@ -1,0 +1,24 @@
+#include "msg_scroll_area.h"
+#include <QMouseEvent>
+MsgScrollArea::MsgScrollArea(QWidget *parent)
+    : QScrollArea(parent) {
+    m_scrollbar = verticalScrollBar();// LCOV_EXCL_LINE
+}
+
+MsgScrollArea::~MsgScrollArea() {
+}
+
+void MsgScrollArea::mousePressEvent(QMouseEvent *event) {
+    auto pos = event->pos();
+    presspos = pos;
+    movepos = pos;
+ 
+}
+void MsgScrollArea::mouseMoveEvent(QMouseEvent *event) {
+    auto pos = event->pos();
+    int d = pos.y() - movepos.y();
+    if (abs(d) > 20)
+        d = 0;
+    movepos = pos;
+    m_scrollbar->setValue(m_scrollbar->value() - d);
+}
