@@ -1,0 +1,19 @@
+#include <QScrollArea>
+#include <QWidget>
+#include <QPoint>
+#include <QScrollBar>
+class MsgScrollArea : public QScrollArea {
+    Q_OBJECT
+public:
+    MsgScrollArea(QWidget *parent);
+    ~MsgScrollArea();
+
+private:
+    QPoint presspos;
+    QPoint movepos;
+    QScrollBar *m_scrollbar;
+
+protected:
+    virtual void mousePressEvent(QMouseEvent *event);
+    virtual void mouseMoveEvent(QMouseEvent *event);
+};
