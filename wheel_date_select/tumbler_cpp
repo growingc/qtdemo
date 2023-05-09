@@ -1,0 +1,406 @@
+#include "tumbler.h"
+#include "qpainter.h"
+#include "qevent.h"
+#include "qdebug.h"
+
+Tumbler::Tumbler(QWidget *parent)
+    : QWidget(parent) {
+    current_index = 0;
+    current_value = "1";
+
+    for (int i = 1; i <= 12; i++) {
+        list_value.append(QString::number(i));
+    }
+
+    foreground = QColor(63, 75, 118);
+    background = QColor(22, 36, 88);
+    line_color = QColor(73, 112, 255);
+    text_color = QColor(144, 161, 224);
+
+    horizontal = false;
+
+    percent = 3;
+    offset = 0;
+    pressed = 0;
+    pressed_pos = 0;
+    current_pos = 0;
+
+    // setFont(QFont font);
+}
+
+Tumbler::~Tumbler() {
+}
+
+void Tumbler::wheelEvent(QWheelEvent *) {
+    //滚动的角度,*8就是鼠标滚动的距离
+    // int degrees = e->delta() / 8;
+
+    // //滚动的步数,*15就是鼠标滚动的角度
+    // int steps = degrees / 15;
+
+    // //如果是正数代表为左边移动,负数代表为右边移动
+    // if (e->orientation() == Qt::Vertical) {
+    //     int index = current_index - steps;
+
+    //     if (steps > 0) {
+    //         if (index > 0) {
+    //             setCurrentIndex(index);
+    //         } else {
+    //             setCurrentIndex(0);
+    //         }
+    //     } else {
+    //         if (index < list_value.count() - 1) {
+    //             setCurrentIndex(index);
+    //         } else {
+    //             setCurrentIndex(list_value.count() - 1);
+    //         }
+    //     }
+    // }
+}
+
+void Tumbler::mousePressEvent(QMouseEvent *e) {
+    pressed = true;
+    int target = e->pos().x();
+
+    if (!horizontal) {
+        target = e->pos().y();
+    }
+
+    pressed_pos = target;
+}
+
+void Tumbler::mouseMoveEvent(QMouseEvent *e) {
+    int count = list_value.count();
+
+    if (count <= 1) {
+        return;
+    }
+
+    int pos = e->pos().x();
+    int target = this->width();
+
+    if (!horizontal) {
+        pos = e->pos().y();
+        target = this->height();
+    }
+
+    int index = list_value.indexOf(current_value);
+
+    if (pressed) {
+        //数值到边界时,阻止继续往对应方向移动
+        // if ((index == 0 && pos >= pressed_pos) || (index == count - 1 && pos <= pressed_pos)) {
+        //     return;
+        // }
+
+        offset = pos - pressed_pos;
+
+        //若移动速度过快时进行限制
+        if (offset > target / percent) {
+            offset = target / percent;
+        } else if (offset < -target / percent) {
+            offset = -target / percent;
+        }
+
+        static int oldIndex = -1;
+
+        if (oldIndex != index) {
+            emit currentIndexChanged(index);
+            emit currentValueChanged(list_value.at(index));
+            oldIndex = index;
+        }
+
+        update();
+    }
+}
+
+void Tumbler::mouseReleaseEvent(QMouseEvent *) {
+    if (pressed) {
+        pressed = false;
+        //矫正到居中位置
+        checkPosition();
+    }
+}
+
+void Tumbler::paintEvent(QPaintEvent *) {
+    //绘制准备工作,启用反锯齿
+    QPainter painter(this);
+    painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+
+    int count = list_value.count();
+
+    if (count <= 1) {
+        return;
+    }
+
+    int target = this->width();
+
+    if (!horizontal) {
+        target = this->height();
+    }
+
+    int index = list_value.indexOf(current_value);
+
+    //当右移偏移量大于比例索引-1
+    if (offset >= target / percent) {
+        pressed_pos += target / percent;
+        offset -= target / percent;
+        index -= 1;
+    }
+
+    //当左移偏移量小于比例索引+1
+    if (offset <= -target / percent) {
+        pressed_pos -= target / percent;
+        offset += target / percent;
+        index += 1;
+    }
+
+    if (index < 0) {
+        index = count - 1;
+    }
+    if (index > count - 1) {
+        index = index - count;
+    }
+
+    current_index = index;
+    current_value = list_value.at(index);
+
+    //绘制背景
+    drawBg(&painter);
+
+    //绘制线条
+    drawLine(&painter);
+
+    //绘制中间值
+    painter.setPen(text_color);
+    drawText(&painter, index, offset);
+    painter.setPen(foreground);
+
+    //绘制左侧值
+    if (index != 0) {
+        drawText(&painter, index - 1, offset - target / percent);
+    } else {
+        drawText(&painter, count - 1, offset - target / percent);
+    }
+
+    //绘制右侧值
+    if (index != count - 1) {
+        drawText(&painter, index + 1, offset + target / percent);
+    } else {
+        drawText(&painter, 0, offset + target / percent);
+    }
+}
+
+void Tumbler::drawBg(QPainter *painter) {
+    painter->save();
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(background);
+    painter->drawRect(rect());
+    painter->restore();
+}
+
+void Tumbler::drawLine(QPainter *painter) {
+    //上下部分偏移量
+    int offset = 10;
+    int width = this->width();
+    int height = this->height();
+
+    painter->save();
+    painter->setBrush(Qt::NoBrush);
+
+    QPen pen;
+    pen.setWidth(2);
+    pen.setColor(line_color);
+    pen.setCapStyle(Qt::RoundCap);
+    painter->setPen(pen);
+
+    //每次同时存在三个元素
+    if (horizontal) {
+        painter->drawLine(width / 3 * 1, offset, width / 3 * 1, height - offset);
+        painter->drawLine(width / 3 * 2, offset, width / 3 * 2, height - offset);
+    } else {
+        painter->drawLine(offset - 5, height / 3 * 1 + 5, width - offset + 5, height / 3 * 1 + 5);
+        painter->drawLine(offset - 5, height / 3 * 2 - 5, width - offset + 5, height / 3 * 2 - 5);
+    }
+
+    painter->restore();
+}
+
+void Tumbler::drawText(QPainter *painter, int index, int offset) {
+    painter->save();
+
+    int width = this->width();
+    int height = this->height();
+    QString strValue = list_value.at(index);
+
+    int target = width;
+
+    if (!horizontal) {
+        target = height;
+    }
+
+    // QFont font = painter->font();
+    m_font.setPixelSize((target - qAbs(offset)) / 8);
+    painter->setFont(m_font);
+
+    if (horizontal) {
+        int textWidth = painter->fontMetrics().horizontalAdvance(strValue);
+        int initX = width / 2 + offset - textWidth / 2;
+        painter->drawText(QRect(initX, 0, textWidth, height), Qt::AlignCenter, strValue);
+
+        //计算最后中间值停留的起始坐标,以便鼠标松开时矫正居中
+        if (index == current_index) {
+            current_pos = initX;
+        }
+    } else {
+        int textHeight = painter->fontMetrics().height();
+        int initY = height / 2 + offset - textHeight / 2;
+        painter->drawText(QRect(0, initY, width, textHeight), Qt::AlignCenter, strValue);
+
+        //计算最后中间值停留的起始坐标,以便鼠标松开时矫正居中
+        if (index == current_index) {
+            current_pos = initY;
+        }
+    }
+
+    painter->restore();
+}
+
+void Tumbler::checkPosition() {
+    int target = this->width();
+
+    if (!horizontal) {
+        target = this->height();
+    }
+
+    //左右滑动样式,往左滑动时,offset为负数,当前值所在X轴坐标小于宽度的一半,则将当前值设置为下一个值
+    //左右滑动样式,往右滑动时,offset为正数,当前值所在X轴坐标大于宽度的一半,则将当前值设置为上一个值
+    //上下滑动样式,往上滑动时,offset为负数,当前值所在Y轴坐标小于高度的一半,则将当前值设置为下一个值
+    //上下滑动样式,往下滑动时,offset为正数,当前值所在Y轴坐标大于高度的一半,则将当前值设置为上一个值
+    if (offset < 0) {
+        if (current_pos < target / 2) {
+            offset = 0;
+            setCurrentIndex(current_index + 1);
+        }
+    } else {
+        if (current_pos > target / 2) {
+            offset = 0;
+            setCurrentIndex(current_index - 1);
+        }
+    }
+}
+
+QStringList Tumbler::getListValue() const {
+    return this->list_value;
+}
+
+int Tumbler::getCurrentIndex() const {
+    return this->current_index;
+}
+
+QString Tumbler::getCurrentValue() const {
+    return this->current_value;
+}
+
+bool Tumbler::getHorizontal() const {
+    return this->horizontal;
+}
+
+QColor Tumbler::getForeground() const {
+    return this->foreground;
+}
+
+QColor Tumbler::getBackground() const {
+    return this->background;
+}
+
+QColor Tumbler::getLineColor() const {
+    return this->line_color;
+}
+
+QColor Tumbler::getTextColor() const {
+    return this->text_color;
+}
+
+QSize Tumbler::sizeHint() const {
+    return QSize(50, 150);
+}
+
+QSize Tumbler::minimumSizeHint() const {
+    return QSize(10, 10);
+}
+
+void Tumbler::setListValue(const QStringList &list_value) {
+    if (list_value.count() > 0) {
+        this->list_value = list_value;
+        setCurrentIndex(0);
+        setCurrentValue(list_value.at(0));
+        update();
+    }
+}
+
+void Tumbler::setCurrentIndex(int current_index) {
+    int count = list_value.count();
+    if (current_index < 0) {
+        current_index = count - 1;
+    }
+
+    if (current_index > count - 1) {
+        current_index = 0;
+    }
+    // if (current_index >= 0) {
+    this->current_index = current_index;
+    this->current_value = list_value.at(current_index);
+    emit currentIndexChanged(this->current_index);
+    emit currentValueChanged(this->current_value);
+    update();
+    // }
+}
+
+void Tumbler::setCurrentValue(const QString &current_value) {
+    if (list_value.contains(current_value)) {
+        this->current_value = current_value;
+        this->current_index = list_value.indexOf(current_value);
+        emit currentIndexChanged(this->current_index);
+        emit currentValueChanged(this->current_value);
+        update();
+    }
+}
+
+void Tumbler::setHorizontal(bool horizontal) {
+    if (this->horizontal != horizontal) {
+        this->horizontal = horizontal;
+        update();
+    }
+}
+
+void Tumbler::setForeground(const QColor &foreground) {
+    if (this->foreground != foreground) {
+        this->foreground = foreground;
+        update();
+    }
+}
+
+void Tumbler::setBackground(const QColor &background) {
+    if (this->background != background) {
+        this->background = background;
+        update();
+    }
+}
+
+void Tumbler::setLineColor(const QColor &line_color) {
+    if (this->line_color != line_color) {
+        this->line_color = line_color;
+        update();
+    }
+}
+
+void Tumbler::setTextColor(const QColor &text_color) {
+    if (this->text_color != text_color) {
+        this->text_color = text_color;
+        update();
+    }
+}
+
+void Tumbler::setFont(QFont font) {
+    m_font = font;
+}

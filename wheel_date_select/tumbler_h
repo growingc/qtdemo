@@ -1,0 +1,90 @@
+#include <QWidget>
+
+class Tumbler : public QWidget {
+    Q_OBJECT
+
+    Q_PROPERTY(int current_index READ getCurrentIndex WRITE setCurrentIndex)
+    Q_PROPERTY(QString current_value READ getCurrentValue WRITE setCurrentValue)
+    Q_PROPERTY(bool horizontal READ getHorizontal WRITE setHorizontal)
+
+    Q_PROPERTY(QColor foreground READ getForeground WRITE setForeground)
+    Q_PROPERTY(QColor background READ getBackground WRITE setBackground)
+    Q_PROPERTY(QColor line_color READ getLineColor WRITE setLineColor)
+    Q_PROPERTY(QColor text_color READ getTextColor WRITE setTextColor)
+
+public:
+    explicit Tumbler(QWidget *parent = 0);
+    ~Tumbler();
+
+protected:
+    void wheelEvent(QWheelEvent *);
+    void mousePressEvent(QMouseEvent *);
+    void mouseMoveEvent(QMouseEvent *);
+    void mouseReleaseEvent(QMouseEvent *);
+    void paintEvent(QPaintEvent *);
+    void drawBg(QPainter *painter);
+    void drawLine(QPainter *painter);
+    void drawText(QPainter *painter, int index, int offset);
+
+private:
+    QStringList list_value; //值队列
+    int current_index;      //当前索引
+    QString current_value;  //当前值
+    bool horizontal;        //是否横向显示
+
+    QColor foreground; //前景色
+    QColor background; //背景色
+    QColor line_color; //线条颜色
+    QColor text_color; //当前文本颜色
+
+    int percent;     //比例
+    int offset;      //偏离值
+    bool pressed;    //鼠标是否按下
+    int pressed_pos; //按下处坐标
+    int current_pos; //当前值对应起始坐标
+
+    QFont m_font;
+
+private:
+    void checkPosition();
+
+public:
+    QStringList getListValue() const;
+    int getCurrentIndex() const;
+    QString getCurrentValue() const;
+    bool getHorizontal() const;
+
+    QColor getForeground() const;
+    QColor getBackground() const;
+    QColor getLineColor() const;
+    QColor getTextColor() const;
+
+    QSize sizeHint() const;
+    QSize minimumSizeHint() const;
+
+    void setFont(QFont font);
+
+public slots:
+    //设置值队列
+    void setListValue(const QStringList &listValue);
+    //设置当前索引
+    void setCurrentIndex(int current_index);
+    //设置当前值
+    void setCurrentValue(const QString &current_value);
+    //设置横向显示,如果为假则纵向显示
+    void setHorizontal(bool horizontal);
+
+    //设置前景色
+    void setForeground(const QColor &foreground);
+    //设置背景色
+    void setBackground(const QColor &background);
+    //设置线条颜色
+    void setLineColor(const QColor &line_color);
+    //设置文本颜色
+    void setTextColor(const QColor &text_color);
+
+signals:
+    void currentIndexChanged(int current_index);
+    void currentValueChanged(QString current_value);
+};
+

@@ -1,0 +1,256 @@
+#include "tumbler_datetime.h"
+#include "qboxlayout.h"
+#include "tumbler.h"
+#include "qdebug.h"
+
+#define YEAR_MIN 2000
+#define YEAR_MAX 2101
+#define MONTH_MIN 1
+#define MONTH_MAX 12
+#define DAY_MIN 1
+#define DAY_MAX 31
+#define HOUR_MIN 0
+#define HOUR_MAX 23
+#define MINUTE_MIN 0
+#define MINUTE_MAX 59
+#define SECOND_MIN 0
+#define SECOND_MAX 59
+
+TumblerDateTime::TumblerDateTime(QWidget *parent)
+    : QWidget(parent) {
+    this->initForm();
+}
+
+void TumblerDateTime::initForm() {
+    //年份选择器
+    tumbler_year = new Tumbler(this);
+    QStringList listYear;
+    for (int i = YEAR_MIN; i <= YEAR_MAX; i++) {
+        listYear << QString("%1").arg(i);
+    }
+    tumbler_year->setListValue(listYear);
+    tumbler_year->setGeometry(0, 0, 90, 200);
+
+    lyear = new QLabel(this);
+    lyear->setGeometry(92, 0, 25, 200);
+    lyear->setText(tr("year"));
+    lyear->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //月份选择器
+    tumbler_month = new Tumbler(this);
+    QStringList listMonth;
+    for (int i = MONTH_MIN; i <= MONTH_MAX; i++) {
+        listMonth << QString("%1").arg(i);
+    }
+    tumbler_month->setListValue(listMonth);
+    tumbler_month->setGeometry(125, 0, 70, 200);
+
+    lmonth = new QLabel(this);
+    lmonth->setGeometry(197, 0, 25, 200);
+    lmonth->setText(tr("month"));
+    lmonth->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //日期选择器
+    tumbler_day = new Tumbler(this);
+    QStringList listDay;
+    for (int i = DAY_MIN; i <= DAY_MAX; i++) {
+        listDay << QString("%1").arg(i);
+    }
+    tumbler_day->setListValue(listDay);
+    tumbler_day->setGeometry(230, 0, 70, 200);
+
+    lday = new QLabel(this);
+    lday->setGeometry(302, 0, 25, 200);
+    lday->setText(tr("day"));
+    lday->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //年月日联动
+    connect(tumbler_year, SIGNAL(currentValueChanged(QString)), this,
+            SLOT(currentValueChanged(QString)));
+    connect(tumbler_month, SIGNAL(currentValueChanged(QString)), this,
+            SLOT(currentValueChanged(QString)));
+
+    //时钟选择器
+    tumbler_hour = new Tumbler(this);
+    QStringList listHour;
+    for (int i = HOUR_MIN; i <= HOUR_MAX; i++) {
+        listHour << QString("%1").arg(i);
+    }
+    tumbler_hour->setListValue(listHour);
+    tumbler_hour->setGeometry(335, 0, 70, 200);
+
+    lhour = new QLabel(this);
+    lhour->setGeometry(407, 0, 25, 200);
+    lhour->setText(tr("hour"));
+    lhour->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //分钟选择器
+    tumbler_min = new Tumbler(this);
+    QStringList listMin;
+    for (int i = MINUTE_MIN; i <= MINUTE_MAX; i++) {
+        listMin << QString("%1").arg(i);
+    }
+    tumbler_min->setListValue(listMin);
+    tumbler_min->setGeometry(450, 0, 70, 200);
+
+    lmin = new QLabel(this);
+    lmin->setGeometry(522, 0, 25, 200);
+    lmin->setText(tr("minute"));
+    lmin->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //秒钟选择器
+    tumbler_sec = new Tumbler(this);
+    QStringList listSec;
+    for (int i = SECOND_MIN; i <= SECOND_MAX; i++) {
+        listSec << QString("%1").arg(i);
+    }
+    tumbler_sec->setListValue(listSec);
+    tumbler_sec->setGeometry(555, 0, 70, 200);
+
+    lsec = new QLabel(this);
+    lsec->setGeometry(627, 0, 25, 200);
+    lsec->setText(tr("second"));
+    lsec->setStyleSheet("font-size: 25px;\ncolor: rgb(144, 161, 224);");
+
+    //将选择器添加到布局
+    // QHBoxLayout *layout = new QHBoxLayout(this);
+    // layout->setMargin(10);
+    // layout->setSpacing(30);
+    // layout->addWidget(tumbler_year);
+    // layout->addWidget(lyear);
+    // layout->addWidget(tumbler_month);
+    // layout->addWidget(tumbler_day);
+    // layout->addWidget(tumbler_hour);
+    // layout->addWidget(tumbler_min);
+    // layout->addWidget(tumbler_sec);
+}
+
+void TumblerDateTime::currentValueChanged(const QString &) {
+    int month = tumbler_month->getCurrentValue().left(2).toInt();
+
+    //记住之前的日期
+    int day = tumbler_day->getCurrentValue().left(2).toInt();
+
+    //计算该月最大日期
+    int max_day = 30;
+    if (month == 2) {
+        //平年28天 闰年29天
+        int year = tumbler_year->getCurrentValue().left(4).toInt();
+        bool isLoopYear = (((0 == (year % 4)) && (0 != (year % 100))) || (0 == (year % 400)));
+        if (isLoopYear) {
+            max_day = 29;
+        } else {
+            max_day = 28;
+        }
+    } else if (month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 ||
+               month == 12) {
+        max_day = 31;
+    }
+
+    QStringList listDay;
+    for (int i = 1; i <= max_day; i++) {
+        listDay << QString("%1").arg(i);
+    }
+
+    tumbler_day->setListValue(listDay);
+
+    //如果上次的日期大于最大的日期则设置为最大的日期
+    if (day > max_day) {
+        tumbler_day->setCurrentIndex(max_day - 1);
+    } else {
+        tumbler_day->setCurrentIndex(day - 1);
+    }
+}
+
+int TumblerDateTime::getYear() const {
+    return tumbler_year->getCurrentValue().toInt();
+}
+
+int TumblerDateTime::getMonth() const {
+    return tumbler_month->getCurrentValue().left(2).toInt();
+}
+
+int TumblerDateTime::getDay() const {
+    return tumbler_day->getCurrentValue().toInt();
+}
+
+int TumblerDateTime::getHour() const {
+    return tumbler_hour->getCurrentValue().toInt();
+}
+
+int TumblerDateTime::getMin() const {
+    return tumbler_min->getCurrentValue().toInt();
+}
+
+int TumblerDateTime::getSec() const {
+    return tumbler_sec->getCurrentValue().toInt();
+}
+
+void TumblerDateTime::setYear(int year) {
+    tumbler_year->setCurrentValue(QString("%1").arg(year));
+}
+
+void TumblerDateTime::setMonth(int month) {
+    tumbler_month->setCurrentValue(QString("%1").arg(month));
+}
+
+void TumblerDateTime::setDay(int day) {
+    tumbler_day->setCurrentValue(QString("%1").arg(day));
+}
+
+void TumblerDateTime::setHour(int hour) {
+    tumbler_hour->setCurrentValue(QString("%1").arg(hour));
+}
+
+void TumblerDateTime::setMin(int min) {
+    tumbler_min->setCurrentValue(QString("%1").arg(min));
+}
+
+void TumblerDateTime::setSec(int sec) {
+    tumbler_sec->setCurrentValue(QString("%1").arg(sec));
+}
+
+void TumblerDateTime::setDateTime(int year, int month, int day, int hour, int min, int sec) {
+    setYear(year);
+    setMonth(month);
+    setDay(day);
+    setHour(hour);
+    setMin(min);
+    setSec(sec);
+}
+
+void TumblerDateTime::setFont(QFont font) {
+    tumbler_year->setFont(font);
+    tumbler_month->setFont(font);
+    tumbler_day->setFont(font);
+    tumbler_hour->setFont(font);
+    tumbler_min->setFont(font);
+    tumbler_sec->setFont(font);
+
+    lyear->setFont(font);
+    lmonth->setFont(font);
+    lday->setFont(font);
+    lhour->setFont(font);
+    lmin->setFont(font);
+    lsec->setFont(font);
+}
+
+void TumblerDateTime::changeEvent(QEvent *event) {
+
+    if (event->type() == QEvent::LanguageChange) {
+        // retranslate qtDesigner form
+        retranslateUi();
+        // retranslate other widgets which weren't added in designer, if needed
+    }
+    // call of base class implementation
+    QWidget::changeEvent(event);
+}
+
+void TumblerDateTime::retranslateUi() {
+    lyear->setText(tr("year"));
+    lmonth->setText(tr("month"));
+    lday->setText(tr("day"));
+    lhour->setText(tr("hour"));
+    lmin->setText(tr("minute"));
+    lsec->setText(tr("second"));
+}
