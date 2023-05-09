@@ -1,0 +1,21 @@
+#include <QLabel>
+#include <QWidget>
+#include <QTimer>
+class MsgScrollLabel : public QLabel {
+    Q_OBJECT
+public:
+    MsgScrollLabel(QWidget *parent);
+
+private slots:
+    void updateTextSlot();
+
+protected:
+    void paintEvent(QPaintEvent *event);
+
+private:
+    int m_current_index = 0; //文本起始x点
+    int m_text_width = 0;
+    QString m_text;
+    QString m_draw_text;
+    QTimer *scroll_timer;
+};

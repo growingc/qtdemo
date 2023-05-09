@@ -1,0 +1,42 @@
+#include "msg_scroll_label.h"
+#include <QPainter>
+MsgScrollLabel::MsgScrollLabel(QWidget *parent)
+    : QLabel(parent) {
+    scroll_timer = new QTimer(this);
+    scroll_timer->start(20);// LCOV_EXCL_LINE
+    connect(scroll_timer, SIGNAL(timeout()), this, SLOT(updateTextSlot()));// LCOV_EXCL_LINE
+}
+
+void MsgScrollLabel::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event)
+    QPainter painter(this);
+    QRectF rectText = rect();
+    rectText.setWidth(width() + m_text_width);
+    rectText.setX(-m_current_index);
+    painter.drawText(rectText, alignment(), m_draw_text);// LCOV_EXCL_LINE
+}
+
+void MsgScrollLabel::updateTextSlot() {
+    if (text().isEmpty()) //如果是空直接返回，不更新，节省资源
+        return;
+
+    if (m_text != text()) {
+        m_text = text();
+        m_draw_text = text();
+        m_current_index = -20; //初始位置，相当于前面空一格显示
+        m_text_width = fontMetrics().horizontalAdvance(m_text); // LCOV_EXCL_LINE
+        update();
+    }
+    if (fontMetrics().horizontalAdvance(m_text) > width()) {
+        while (fontMetrics().horizontalAdvance(m_draw_text) < width() + m_text_width) {
+            m_draw_text = m_draw_text + text();
+        }
+        m_current_index++;
+    }
+    if (m_current_index + width() < m_text_width) {
+        update();
+    } else if (m_current_index + width() == m_text_width + 15) { //到位后延时0.9s // LCOV_EXCL_LINE
+        m_current_index = -20; // LCOV_EXCL_LINE
+        update();
+    }
+}
