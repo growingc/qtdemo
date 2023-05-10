@@ -1,0 +1,33 @@
+QString getTimeStampString(const char *dateFormat = "yyyy-MM-dd hh:mm:ss:zzz");
+QString LocateArmFatigueTestWidget::getTimeStampString(const char *dateFormat) {
+    return QDateTime::currentDateTime().toString(dateFormat);
+}
+
+void Widget::createLogPath(QString log_path) {
+    QDir tempDir;
+    if (!tempDir.exists(log_path)) {
+        tempDir.mkpath(log_path);
+    }
+}
+
+void Widget::createLogFile(QString file_name) {
+    QFile file2;
+    file2.setFileName(file_name);
+    if (!file2.exists()) {
+        if (!file2.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            qDebug() << "打开失败!";
+        }
+    }
+    file2.close();
+}
+
+void Widget::writeLocateArmFatigueTestlog(QString str) {
+    QFile file(m_current_locate_arm_test_log_file);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append) == false) {
+        qDebug() << "open file failed!";
+        return;
+    }
+    str += "\n";
+    file.write(str.toUtf8());
+    file.close();
+}

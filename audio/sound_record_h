@@ -1,0 +1,115 @@
+#include <QtUiPlugin/QDesignerExportWidget>
+#include <QtWidgets/QWidget>
+#include <qdom.h>
+#include <QAudio>
+#include <QAudioInput>
+#include <QAudioOutput>
+#include <QBuffer>
+#include <qudpsocket.h>
+#include <qslider.h>
+#include <QtWidgets/QPushButton>
+#include "ui_data_define.h"
+#include <QTimer>
+#include "plugin_interface.h"
+#include <QMutexLocker>
+#include <QProcess>
+
+class QDESIGNER_WIDGET_EXPORT SoundRecord : public QWidget, public PluginInterface {
+    Q_OBJECT
+    Q_PROPERTY(int id MEMBER m_id)
+    Q_PROPERTY(QString help MEMBER m_help)
+    Q_PROPERTY(QString self_ip MEMBER m_host_ip)
+    Q_PROPERTY(QString other_ip MEMBER m_other_ip)
+    Q_PROPERTY(int self_port MEMBER m_host_port)
+    Q_PROPERTY(int other_port MEMBER m_other_port)
+public:
+    SoundRecord(QWidget *parent = 0);
+    ~SoundRecord();
+    void init(QDomNode node, QRect rect);
+
+    void shUiXcuEven(ushort param, ushort status);
+    void reportRecordStatusfunc(void (*func)(uchar recordStatus)) {
+        cb_report_record_status_func = func;
+    }
+    void setQiconPath(QString iconPath) {
+        this->m_qicon_path = iconPath;
+    }
+    void setIsDisplay(int isDisplay);
+    void msgHandler(char *msg);
+
+private:
+    QRect m_self_rect;
+    QRect m_parentRect;
+    QWidget *m_window;
+    QWidget *m_parent;
+    QWidget *m_dialog;
+    int m_id;
+    QString m_help;
+    QString m_host_ip;
+    int m_host_port;
+    QString m_other_ip;
+    int m_other_port;
+    QAudioInput *m_audio_in;   // class member.
+    QAudioOutput *m_audio_out; // class member.
+    QIODevice *m_buffer_in;
+    QIODevice *m_buffer_out;
+    QUdpSocket *m_udp_socket_rec;
+    QUdpSocket *m_udp_socket_send;
+    bool m_start_send;
+
+    QPushButton *m_stop_play_button;
+    QPushButton *m_stop_record_button;
+    QSlider *m_volume_slider;
+
+    S32 m_audio_volume;
+    S32 m_mic_volume;
+
+    int m_volume;
+    int m_is_visible;
+    int m_param;
+    int m_is_audio_open;
+
+    QString m_qicon_path;
+    bool is_first_init;
+
+    QTimer *check_pulse_audio_status_timer;
+    QTimer *start_audio_timer;
+    QProcess *pulseaudio_process;
+    bool is_send_audio_fault_msg;
+
+    void (*cb_report_record_status_func)(uchar recordStatus);
+
+private:
+    void paintEvent(QPaintEvent *event);
+    void send2UdpConnect(QByteArray const &data);
+    void play(QByteArray const &data);
+    void initRecordAndPlay();
+    void initUdpConnect();
+    void stopRecording();
+    void stopPlaying();
+    void startRecording();
+    void startPlaying();
+    void updateAudioMicVolume(S32 audio_volume, S32 mic_volume);
+    void startSend(bool isstart);
+    void setVolumeAndStartSendStatus(bool isstart, int volume);
+    void writeLogFile(QString);
+    void resetAudio();
+
+signals:
+    void srUiUpdateSignal();
+    void srUpdateAudioMicVolueSignal();
+    void srSetAudioStateSignal();
+
+private slots:
+    void repaintFrame();
+    void readMore();
+    void udpdataReceived();
+    void stopRecordButtonClickedSlot();
+    void sliderValueChangedSlot(int value);
+    void srUiUpdateSlot();
+    void srUpdateAudioMicVolueSlot();
+    void srAudioStateSlot();
+    void srCheckPulseAudioStatusTimerSlot();
+    void srStartAudioTimerSlot();
+    void srAudioStateChangedSlot(QAudio::State);
+};

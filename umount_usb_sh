@@ -1,0 +1,40 @@
+#!/bin/bash
+#set -x
+
+
+function command_auto_put_passwd()
+{
+	cmd=$1
+	password=123456
+	if [ x${auto_put_passwd} == x"true" -o x${auto_put_passwd} == x"" ];then
+    expect << EOF
+	  set timeout -1
+	  spawn ${cmd}
+	  expect {
+		"password" { send "$password\r"; }
+	  }
+	  expect eof
+	  catch wait result
+	  exit [lindex \$result 3]
+EOF
+	else
+		${cmd}
+	fi 
+}
+
+function umount_usb(){
+	mount_path=$1
+	if mount | grep "on $mount_path type vfat"; then
+		command_auto_put_passwd "sudo umount $mount_path"
+		if [ "`ls -A $mount_path`" = "" ]; then
+			echo "$mount_path is indeed empty"
+			command_auto_put_passwd "sudo rm -rf $mount_path"
+		else
+			echo "$mount_path is not empty"
+		fi
+		echo "U盘已经成功卸载"
+	else
+		echo "U盘未挂载"
+	fi
+	
+}

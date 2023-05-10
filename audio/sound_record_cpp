@@ -1,0 +1,416 @@
+#include "sound_record.h"
+#include "qmessagebox.h"
+#include <QDebug>
+#include <QNetworkInterface>
+#include <nbus/msg/def_comm_obj.h>
+#include <nbus/msg/ui_msg_frame.h>
+#include <nbus/msg/locate_arm_msg_frame.h>
+#include <nbus/msg/motor_ctrl_comm_obj.h>
+#include <nbus/msg/comm_msg_frame.h>
+#include <nbus/msg/move_msg.h>
+#include <QDebug>
+#include <QDir>
+#include <QDateTime>
+
+#define AUDIO_SAMPLE_RATE 22050    // 22050, 44100
+#define AUDIO_SAMPLE_SAMPLE_SIZE 2 // 2 bytes
+#define AUDIO_CHANNALS 1
+#define AUDIO_SINK_FRAME_TIME (20 / 1000)
+#define AUDIO_SINK_FRAME_SIZE                                                                      \
+    (quint32)(AUDIO_SAMPLE_RATE * AUDIO_SAMPLE_SAMPLE_SIZE * AUDIO_CHANNALS * AUDIO_SINK_FRAME_TIME)
+
+#define AUDIO_OUT_BUFFER_SIZE                                                                      \
+    (quint32)(AUDIO_SINK_FRAME_SIZE *                                                              \
+              12.5) //系统推荐放音缓冲区大小 = out_period_size * 12.5，改小可以减小延时
+
+static bool isProcessRunning(const QString &process_name) {
+    QProcess qp;
+    QString bash_command = "/bin/bash";
+    QStringList bash_args = QStringList()
+                            << "-c"
+                            << QString("ps -ef | grep %1 |grep -v grep | wc -l").arg(process_name);
+    qp.start(bash_command, bash_args);
+    qp.waitForFinished();
+    QString output = qp.readAllStandardOutput();
+    bool ok;
+    int cnt = output.trimmed().toInt(&ok);
+    return ok && cnt > 0;
+}
+
+SoundRecord::SoundRecord(QWidget *parent)
+    : QWidget(parent)
+    , m_audio_in(NULL)
+    , m_audio_out(NULL)
+    , m_buffer_in(NULL)
+    , m_buffer_out(NULL)
+    , m_udp_socket_rec(NULL)
+    , m_udp_socket_send(NULL)
+    , m_start_send(true) {
+    m_window = parent;
+    while (m_window != NULL) {
+        if (m_window->parentWidget() == NULL) {
+            break;
+        } else {
+            m_dialog = m_window;
+            m_window = m_window->parentWidget();
+        }
+    }
+    m_self_rect = QRect(0, 0, 0, 0);
+    m_parentRect = QRect(0, 0, 0, 0);
+
+    this->resize(320, 70);
+    this->setAutoFillBackground(false);
+
+    m_stop_play_button = new QPushButton(this);
+    m_stop_play_button->setGeometry(3, 3, 66, 66);
+    m_stop_play_button->setText("");
+    m_stop_play_button->setStyleSheet(
+        "QPushButton{border-image: url(:/new/images/image/play.png);}"
+        "QPushButton:hover{border-image: url(:/new/images/image/play.png);}"
+        "QPushButton:pressed{border-image:url(:/new/images/image/play.png);}");
+
+    m_start_send = true;
+    is_first_init = true;
+
+    m_stop_record_button = new QPushButton(this);
+    m_stop_record_button->setGeometry(240, 5, 66, 66);
+    m_stop_record_button->setText("");
+    m_stop_record_button->setStyleSheet(
+        "QPushButton{border-image: url(:/new/images/image/Record.png);}"
+        "QPushButton:hover{border-image: url(:/new/images/image/Record.png);}"
+        "QPushButton:pressed{border-image:url(:/new/images/image/Record.png);}");
+
+    m_volume = 100;
+
+    m_volume_slider = new QSlider(this);
+    m_volume_slider->setGeometry(83, 30, 131, 19);
+    m_volume_slider->setOrientation(Qt::Orientation::Horizontal);
+    m_volume_slider->setValue(m_volume);
+    m_volume_slider->setMaximum(100);
+    m_volume_slider->setMinimum(0);
+    m_volume_slider->setSingleStep(10);
+
+    m_id = 0;
+    m_is_visible = UI_HIDE;
+    m_is_audio_open = false;
+    m_mic_volume = 30;
+    m_audio_volume = 30;
+
+    pulseaudio_process = new QProcess();
+    check_pulse_audio_status_timer = new QTimer(this);
+    start_audio_timer = new QTimer(this);
+    is_send_audio_fault_msg = false;
+
+    cb_report_record_status_func = NULL;
+    connect(m_window, SIGNAL(updateSize()), this, SLOT(repaintFrame()));
+    connect(m_stop_record_button, SIGNAL(clicked()), this, SLOT(stopRecordButtonClickedSlot()));
+    connect(this, SIGNAL(srUpdateAudioMicVolueSignal()), this, SLOT(srUpdateAudioMicVolueSlot()));
+    connect(this, SIGNAL(srSetAudioStateSignal()), this, SLOT(srAudioStateSlot()));
+    connect(check_pulse_audio_status_timer, SIGNAL(timeout()), this, SLOT(srCheckPulseAudioStatusTimerSlot()));
+    connect(start_audio_timer, SIGNAL(timeout()), this, SLOT(srStartAudioTimerSlot()));
+    connect(this, SIGNAL(srStartTimerSignal()), this, SLOT(srStartTimerSlot()));
+    
+    check_pulse_audio_status_timer->start(5000);
+}
+
+SoundRecord::~SoundRecord() {
+}
+
+void SoundRecord::init(QDomNode node, QRect rect) {
+    this->setGeometry(rect);
+    m_self_rect = this->geometry();
+    node = node.firstChild();
+    while (!node.isNull()) {
+        if (node.toElement().attributeNode("name").value() == "id") {
+            m_id = node.firstChild().toElement().text().toInt();
+        } else if (node.toElement().attributeNode("name").value() == "styleSheet") {
+            this->setStyleSheet(node.firstChild().toElement().text());
+        } else if (node.toElement().attributeNode("name").value() == "isDisplay") {
+            setIsDisplay(node.firstChild().toElement().text().toInt());
+        } else if (node.toElement().attributeNode("name").value() == "help") {
+            m_help = node.firstChild().toElement().text();
+        } else if (node.toElement().attributeNode("name").value() == "selfIP") {
+            m_host_ip = node.firstChild().toElement().text();
+        } else if (node.toElement().attributeNode("name").value() == "otherIP") {
+            m_other_ip = node.firstChild().toElement().text();
+        } else if (node.toElement().attributeNode("name").value() == "selfPort") {
+            m_host_port = node.firstChild().toElement().text().toInt();
+        } else if (node.toElement().attributeNode("name").value() == "otherPort") {
+            m_other_port = node.firstChild().toElement().text().toInt();
+        } else {
+        }
+        node = node.nextSibling();
+    }
+}
+
+void SoundRecord::srAudioStateSlot() {
+    if (is_first_init && m_is_audio_open) {
+        if(isProcessRunning("pulseaudio")) {
+            initRecordAndPlay();  
+            initUdpConnect();
+        }      
+        
+        is_first_init = false;
+    }
+    if (m_is_audio_open) {
+        startRecording();
+        startPlaying();
+    } else {
+        stopRecording();
+        stopPlaying();
+    }
+}
+
+void SoundRecord::srCheckPulseAudioStatusTimerSlot() {
+    if(!isProcessRunning("pulseaudio")) {
+        QString pulse_command = "/usr/bin/pulseaudio";
+        QStringList pulse_args = QStringList() << "-D"
+                                               << "-L"
+                                               << "module-echo-cancel aec_method=speex";
+        pulseaudio_process->start(pulse_command, pulse_args);
+        if(!start_audio_timer->isActive()){
+            start_audio_timer->start(1000);
+        } 
+    }
+}
+
+void SoundRecord::srStartAudioTimerSlot() {
+    if(isProcessRunning("pulseaudio")) {
+        resetAudio();
+    }
+    start_audio_timer->stop();
+}
+
+void SoundRecord::srAudioStateChangedSlot(QAudio::State state) {
+    qDebug() <<"audio state : " << QString::number(state);
+}
+
+
+void SoundRecord::initRecordAndPlay() {
+    QAudioFormat format;
+    format.setSampleRate(AUDIO_SAMPLE_RATE);
+    format.setChannelCount(AUDIO_CHANNALS);
+    format.setSampleSize(AUDIO_SAMPLE_SAMPLE_SIZE * 8);
+    format.setCodec("audio/pcm");
+    format.setByteOrder(QAudioFormat::LittleEndian);
+    format.setSampleType(QAudioFormat::SignedInt);
+    QAudioDeviceInfo inputDeviceInfo = QAudioDeviceInfo::defaultInputDevice();
+    QAudioDeviceInfo outPutDeviceInfo = QAudioDeviceInfo::defaultOutputDevice();
+    if(!m_audio_in){
+        m_audio_in = new QAudioInput(inputDeviceInfo, format, this); 
+    }
+    if(!m_audio_out){
+        m_audio_out = new QAudioOutput(outPutDeviceInfo, format, this); 
+    }
+    
+    connect(m_audio_in, SIGNAL(stateChanged(QAudio::State)), this, SLOT(srAudioStateChangedSlot(QAudio::State)));
+}
+
+void SoundRecord::initUdpConnect() {
+    if (m_udp_socket_rec)
+        delete m_udp_socket_rec;
+    if (m_udp_socket_send)
+        delete m_udp_socket_send;
+    m_udp_socket_rec = new QUdpSocket();
+    m_udp_socket_send = new QUdpSocket();
+    connect(m_udp_socket_rec, SIGNAL(readyRead()), this, SLOT(udpdataReceived()));
+    bool result = m_udp_socket_rec->bind(QHostAddress(m_host_ip), m_host_port);
+    if (!result) {
+        qDebug() << "udp socket create error!\n";
+    }
+}
+
+void SoundRecord::startRecording() {
+    if (m_audio_in != NULL) {
+        m_buffer_in = m_audio_in->start();
+        m_audio_in->setVolume(qreal(m_mic_volume) / 100.0);
+        if(!m_buffer_in){
+            if(!is_send_audio_fault_msg){
+                if (cb_report_record_status_func != NULL) {
+                    cb_report_record_status_func(UI_STOP_RECORD);
+                }
+                is_send_audio_fault_msg = true;
+            }           
+        }else{
+            connect(m_buffer_in, SIGNAL(readyRead()), this, SLOT(readMore()));
+        }
+    }
+}
+
+void SoundRecord::startPlaying() {
+    if (m_audio_out != NULL) {
+        m_audio_out->setBufferSize(AUDIO_OUT_BUFFER_SIZE);
+        m_buffer_out = m_audio_out->start();
+        m_audio_out->setVolume(qreal(m_audio_volume) / 100.0);
+    
+        if(!m_buffer_out){
+            if(!is_send_audio_fault_msg){
+                if (cb_report_record_status_func != NULL) {
+                    cb_report_record_status_func(UI_STOP_RECORD);
+                }
+                is_send_audio_fault_msg = true;
+            }           
+        }
+    }
+}
+
+void SoundRecord::readMore() {
+    if (m_audio_in == NULL || m_buffer_in == NULL)
+        return;
+    QByteArray buffer;
+    quint32 len = m_audio_in->bytesReady();
+
+    if (len > 0) {
+        buffer.resize(len);
+        m_buffer_in->read(buffer.data(), len);
+        send2UdpConnect(buffer);
+    }
+}
+
+void SoundRecord::send2UdpConnect(QByteArray const &data) {
+    if (m_udp_socket_send == NULL) {
+        return;
+    }
+    if (m_start_send) {
+        m_udp_socket_send->writeDatagram(data, QHostAddress(m_other_ip), m_other_port);
+    }
+}
+
+void SoundRecord::udpdataReceived() {
+    QByteArray datagram;
+    QHostAddress senderAddr;
+    quint32 len_udp = m_udp_socket_rec->pendingDatagramSize();
+    quint32 len_free = m_audio_out->bytesFree();
+
+    if (!m_buffer_out || len_udp <= 0) {
+        return;
+    }
+
+    datagram.resize(len_udp);
+    m_udp_socket_rec->readDatagram(datagram.data(), datagram.size(), &senderAddr);
+
+    if (len_free > len_udp) {
+        m_buffer_out->write(datagram.data(), len_udp);
+    } else {
+        if ((len_free - 0.5 * AUDIO_SINK_FRAME_SIZE) > 0) {
+            m_buffer_out->write(datagram.data(), (int)(len_free - 0.5 * AUDIO_SINK_FRAME_SIZE));
+        }
+        writeLogFile(QString("not enough free buffer !") + QString("len_free:") +
+                     QString::number(len_free) + QString("len_udp:") + QString::number(len_udp));
+    }
+}
+
+void SoundRecord::writeLogFile(QString str) {
+    qDebug() << "soundrecord:" << str;
+}
+
+void SoundRecord::resetAudio() {
+    initRecordAndPlay();
+    startRecording();
+    startPlaying();
+}
+
+void SoundRecord::stopRecording() {
+    if (m_audio_in != NULL) {
+        m_audio_in->stop();
+        m_buffer_in = NULL;
+    }
+}
+
+void SoundRecord::stopPlaying() {
+    if (m_audio_out != NULL) {
+        m_audio_out->stop();
+        m_buffer_out = NULL;
+    }
+}
+
+void SoundRecord::srUpdateAudioMicVolueSlot() {
+    if (m_is_audio_open && m_audio_out != NULL && m_audio_in != NULL) {
+        m_audio_out->setVolume(qreal(m_audio_volume) / 100.0);
+        m_audio_in->setVolume(qreal(m_mic_volume) / 100.0);
+    }
+}
+
+void SoundRecord::updateAudioMicVolume(S32 audio_volume, S32 mic_volume) {
+    m_audio_volume = audio_volume;
+    m_mic_volume = mic_volume;
+    emit srUpdateAudioMicVolueSignal();
+}
+
+void SoundRecord::shUiXcuEven(ushort param, ushort status) {
+    m_param = param;
+    m_is_audio_open = status;
+    emit srSetAudioStateSignal();
+}
+
+void SoundRecord::stopRecordButtonClickedSlot() {
+    if (m_start_send) {
+        m_start_send = false;
+    } else {
+        m_start_send = true;
+    }
+    srUiUpdateSlot();
+}
+
+void SoundRecord::sliderValueChangedSlot(int value) {
+    bool facus = this->m_volume_slider->hasFocus();
+    if (facus) {
+        m_volume = value;
+        srUiUpdateSlot();
+    }
+}
+
+void SoundRecord::srUiUpdateSlot() {
+    m_volume_slider->setValue(m_volume);
+    if (m_start_send) {
+        m_stop_record_button->setStyleSheet(
+            "QPushButton{border-image: url(:/new/images/image/Record.png);}"
+            "QPushButton:hover{border-image: url(:/new/images/image/Record.png);}"
+            "QPushButton:pressed{border-image:url(:/new/images/image/Record.png);}");
+    } else {
+        m_stop_record_button->setStyleSheet(
+            "QPushButton{border-image: url(:/new/images/image/StopRecord.png);}"
+            "QPushButton:hover{border-image: url(:/new/images/image/StopRecord.png);}"
+            "QPushButton:pressed{border-image:url(:/new/images/image/StopRecord.png);}");
+    }
+}
+
+void SoundRecord::setIsDisplay(int isDisplay) {
+    m_is_visible = isDisplay;
+    if (m_is_visible == UI_HIDE) {
+        this->hide();
+    } else {
+        this->show();
+    }
+}
+
+void SoundRecord::paintEvent(QPaintEvent *event) {
+    QWidget::paintEvent(event);
+}
+
+void SoundRecord::repaintFrame() {
+    if ((m_parentRect.width() == 0) || (m_parentRect.height() == 0)) {
+        m_self_rect = this->geometry();
+        m_parentRect = m_dialog->geometry();
+    }
+    if ((m_parentRect.width() != 0) && (m_parentRect.height() != 0)) {
+        this->resize(m_self_rect.width() * m_window->width() / m_parentRect.width(),
+                     m_self_rect.height() * m_window->height() / m_parentRect.height());
+        this->move(m_self_rect.x() * m_window->width() / m_parentRect.width(),
+                   m_self_rect.y() * m_window->height() / m_parentRect.height());
+    }
+}
+
+void SoundRecord::msgHandler(char *msg) {
+#define GET_VALUE(FRAME, KEY) ((*((NBUS_NS::FRAME *)msg))->KEY)
+    NBUS_NS::MsgHeader *header = (NBUS_NS::MsgHeader *)msg;
+    qDebug() << "####SoundRecord::msgHandler type:" << header->type;
+    switch (header->type) {
+        case NBUS_NS::IUI_AUDIO_MIC_UPDATE: {
+            updateAudioMicVolume(GET_VALUE(IUIAudioMicVolumeUpdateFrame, audio_volume),
+                                 GET_VALUE(IUIAudioMicVolumeUpdateFrame, mic_volume));
+        } break;
+        default:
+            break;
+    }
+}

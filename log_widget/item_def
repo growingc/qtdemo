@@ -1,0 +1,24 @@
+
+#include <QMetaType>
+
+typedef enum {
+    LOG_LEVEL_LOG,
+    LOG_LEVEL_FATAL,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_INFO,
+} ItemStatus;
+
+struct ItemData {
+    ItemStatus status;
+    QString time;
+    QString user_id;
+    QString error_code;
+    QString log_detail;
+    QString error_type;
+    int user_type;
+    int src;
+};
+
+Q_DECLARE_METATYPE(ItemData)
+
+#endif /*H2D608F63_24D0_4213_B1AF_5B3C697E748B*/

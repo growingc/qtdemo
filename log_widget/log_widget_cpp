@@ -1,0 +1,357 @@
+#include "log_widget.h"
+#include <QBitmap>
+#include <QDebug>
+#include <common/sr_ui_helpers.h>
+#include <QCoreApplication>
+#include <QFontDatabase>
+#include <QScrollBar>
+#include <QMouseEvent>
+#include <nbus/msg/def_comm_obj.h>
+#include <nbus/msg/ui_msg_frame.h>
+#include <nbus/msg/locate_arm_msg_frame.h>
+#include <nbus/msg/motor_ctrl_comm_obj.h>
+#include <nbus/msg/comm_msg_frame.h>
+#include <nbus/msg/move_msg.h>
+#include <QDebug>
+#include <QElapsedTimer>
+#include "logparser_manager.h"
+#include "item_delegate.h"
+#include <QDirIterator>
+
+LogWidget::LogWidget(QWidget *parent)
+    : QWidget(parent) {
+    this->m_id = 0;
+    m_is_visible = UI_HIDE;
+
+    user_type = NBUS_NS::UNKNOWNUSER;
+    QSize defaultSize(1024, 445);
+    this->resize(defaultSize);
+    this->m_self_rect = QRect(0, 16, defaultSize.width(), defaultSize.height() - 16);
+    last_view_cell_count = 0;
+    m_popup_bg_label = new QLabel(this);
+    m_popup_bg_label->setGeometry(m_self_rect);
+    m_popup_bg_label->setText("");
+    QPixmap popup_bg(QString(":/new/images/image/bg_popup.png"));
+    m_popup_bg_label->setPixmap(popup_bg);
+
+    m_widget = new QWidget(this);
+    m_widget->setGeometry(147, 16, 730, 428);
+    m_widget_label = new QLabel(m_widget);
+    m_widget_label->setText("");
+    QPixmap widget_bg(QString(":/new/images/image/bg_widget.png"));
+    m_widget_label->setPixmap(widget_bg);
+    m_widget->setMask(widget_bg.mask());
+
+    m_title_label = new QLabel(m_widget);
+    m_title_label->setText(tr("log")); //
+    m_title_label->setGeometry(325, 0, 200, 35);
+    m_title_label->setStyleSheet("font-size: 30px;\ncolor: rgb(255, 255, 255);");
+
+    m_close_btn = new QPushButton(this);
+    m_close_btn->setGeometry(834, 18, 45, 45);
+    m_close_btn->setText("");
+    m_close_btn->setStyleSheet(
+        "QPushButton{border-image: url(:/new/images/image/img_btn_close_normal.png);}"
+        "QPushButton:hover{border-image: url(:/new/images/image/img_btn_close_select.png);}"
+        "QPushButton:pressed{border-image:url(:/new/images/image/img_btn_close_select.png);}");
+
+    connect(m_close_btn, SIGNAL(clicked()), this, SLOT(onClickClose()));
+
+    m_date_button = new QPushButton(m_widget);
+    m_date_button->setGeometry(70, 68, 110, 40);
+    m_date_button->setFlat(true);
+    m_date_button->setText(QDateTime::currentDateTime().toString("yyyy/MM/dd"));
+    m_date_button->setStyleSheet("QPushButton{background-color:rgb(24,41,87);\ncolor:rgb(255, 255, "
+                                 "255);\nfont-size:16px;\nborder-style:outset;\nborder-color:rgb("
+                                 "83,106,192);\nborder-width:1px;\nborder-radius:4px;}");
+
+    connect(m_date_button, SIGNAL(clicked()), this, SLOT(onDateButtonClickSlot()));
+
+    initFillterBtn();
+
+    m_listview = new LogListViewWidget(this);
+    m_listview->hide();
+    m_listview->setGeometry(147 + 49, 112 + 16, 630, 260);
+    m_listview->setStyleSheet("background-color: transparent");
+    m_listview->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    m_delegate = new ItemDelegate(this);
+    m_listview->setItemDelegate(m_delegate);
+    m_listview->setSpacing(10);
+    m_proxy_model = new QSortFilterProxyModel(m_listview);
+    m_proxy_model->setFilterRole(Qt::UserRole);
+    m_proxy_model->setDynamicSortFilter(true);
+    m_listview->setModel(m_proxy_model);
+    m_listview->setViewMode(QListView::IconMode);
+    m_listview->setDragEnabled(false);
+
+    m_scrollbar = m_listview->verticalScrollBar();
+
+    m_calender_widget = new QCalendarWidget(m_widget);
+    m_calender_widget->setGeometry(49, 112, 630, 260);
+    m_calender_widget->setStyleSheet(
+        "#qt_calendar_calendarview{background-color: rgb(255, 255, 255);}");
+    m_calender_widget->hide();
+    connect(m_calender_widget, SIGNAL(clicked(const QDate &)), this,
+            SLOT(onClickDate(const QDate &)));
+    connect(this, SIGNAL(srUiUpdateSignal()), this, SLOT(srUiUpdateSlot()));
+
+    getLogParserManagerInst().updateChannels(LOG_LEVEL_LOG, true);
+}
+
+LogWidget::~LogWidget() {
+}
+
+void LogWidget::initFillterBtn() {
+    filter_text[3] = tr("info");
+    filter_text[2] = tr("error");
+    filter_text[1] = tr("fatal");
+    filter_text[0] = tr("log");
+
+    int starx = 250;
+    int starty = 63;
+    int box_w = 100;
+    int box_h = 50;
+
+    filter_button_group = new QButtonGroup(m_widget);
+    filter_button_group->setExclusive(false);
+    for (int i = 0; i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL; i++) {
+        filter_button[i] = new QRadioButton(filter_text[i], m_widget);
+        // filter_button[i]->setFont(m_icofont);
+        filter_button[i]->setGeometry(starx + i * box_w, starty, box_w, box_h);
+        filter_button[i]->setStyleSheet(
+            "QRadioButton{ color: rgb(255, 255, 255); background-color: rgba(255, 255, 255, "
+            "0);}QRadioButton::indicator{width:22px;height:22px;}QRadioButton::indicator:unchecked "
+            "{image:url(:/new/images/image/checkbox_normal.png);}QRadioButton::indicator:checked "
+            "{image:url(:/new/images/image/checkbox_select.png);}");
+        filter_button_group->addButton(filter_button[i], i);
+        filter_button[i]->setChecked(i == LOG_LEVEL_LOG);
+    }
+    connect(filter_button_group, SIGNAL(buttonClicked(int)), this,
+            SLOT(filterButtonGroupClicked(int)));
+}
+void LogWidget::init(QDomNode node, QRect rect) {
+    this->setGeometry(rect);
+    // printf("initSize(%d,%d)\n", rect.width(), rect.height());
+    m_self_rect = this->geometry();
+    node = node.firstChild();
+    while (!node.isNull()) {
+        if (node.toElement().attributeNode("name").value() == "id") {
+            m_id = node.firstChild().toElement().text().toInt();
+        } else if (node.toElement().attributeNode("name").value() == "isDisplay") {
+            setIsDisplay(node.firstChild().toElement().text().toInt());
+        } else if (node.toElement().attributeNode("name").value() == "styleSheet") {
+            this->setStyleSheet(node.firstChild().toElement().text());
+        } else if (node.toElement().attributeNode("name").value() == "logpath") {
+            m_log_path = node.firstChild().toElement().text();
+        } else {
+        }
+        node = node.nextSibling();
+    }
+
+    m_listview->show();
+}
+
+void LogWidget::initFont() {
+    int fontId = QFontDatabase::addApplicationFont(
+        QString("%1/font/SourceHanSansCN-Medium.otf").arg(QCoreApplication::applicationDirPath()));
+    QString fontName = QFontDatabase::applicationFontFamilies(fontId).at(0);
+    m_icofont = QFont(fontName);
+    m_icofont.setPixelSize(16);
+}
+
+void LogWidget::setFont(QFont m_iconfont) {
+    m_title_label->setFont(m_iconfont);
+    m_iconfont.setPixelSize(16);
+    for (int i = 0; i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL; i++) {
+        filter_button[i]->setFont(m_iconfont);
+    }
+}
+
+void LogWidget::onDateButtonClickSlot() {
+    m_calender_widget->setVisible(!(m_calender_widget->isVisible()));
+    m_listview->setVisible(!(m_calender_widget->isVisible()));
+}
+
+void LogWidget::changeEvent(QEvent *event) {
+
+    if (event->type() == QEvent::LanguageChange) {
+        // retranslate qtDesigner form
+        retranslateUi();
+        // retranslate other widgets which weren't added in designer, if needed
+    }
+    // call of base class implementation
+    QWidget::changeEvent(event);
+}
+
+void LogWidget::retranslateUi() {
+    m_title_label->setText(tr("log"));
+    filter_text[3] = tr("info");
+    filter_text[2] = tr("error");
+    filter_text[1] = tr("fatal");
+    filter_text[0] = tr("log");
+    for (int i = 0; i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL; i++) {
+        filter_button[i]->setText(filter_text[i]);
+    }
+}
+
+void LogWidget::onClickClose() {
+    m_is_visible = UI_HIDE;
+    this->hide();
+}
+
+void LogWidget::srUiUpdateSlot() {
+
+    setIsDisplay(m_is_visible);
+}
+
+void LogWidget::shUiXcuEven(ushort param, ushort status) {
+    m_param = param;
+    m_is_visible = status;
+    emit srUiUpdateSignal();
+}
+
+void LogWidget::setIsDisplay(int isDisplay) {
+    m_is_visible = isDisplay;
+    if (m_is_visible == UI_HIDE) {
+        this->hide();
+    } else {
+        onClickDate(QDate::currentDate());
+        m_date_button->setText(QDateTime::currentDateTime().toString("yyyy/MM/dd"));
+        m_calender_widget->setSelectedDate(QDate::currentDate());
+        m_calender_widget->hide();
+        m_listview->show();
+        this->show();
+    }
+}
+
+QStringList LogWidget::getLogFiles(const QString &select_type) {
+    QStringList files;
+    if (m_log_path.isEmpty()) {
+        return files;
+    }
+    QString file_pattern = select_type + "_" + log_date.toString("yyyy-MM-dd").append("-*.log");
+    QDirIterator it(m_log_path, QStringList() << file_pattern, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        files << it.next();
+    }
+
+    return files;
+}
+
+void LogWidget::updateFileLists() {
+    static QStringList type_list{"l", "e", "w", "i"};
+    for (int i = 0; (i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL) && (i < type_list.size()); i++) {
+        if (filter_button[i]->isChecked()) {
+            QStringList ls = getLogFiles(type_list.at(i));
+            ls.sort();
+            getLogParserManagerInst().updateChannels((ItemStatus)i, true);
+            getLogParserManagerInst().initFileList((ItemStatus)i, ls);
+        } else {
+            getLogParserManagerInst().updateChannels((ItemStatus)i, false);
+        }
+    }
+}
+
+void LogWidget::onClickDate(const QDate &date) {
+
+    log_date = date;
+
+    // first reset button state
+    for (int i = 0; i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL; i++) {
+        filter_button[i]->setChecked(false);
+        filter_button[i]->setChecked(i == LOG_LEVEL_LOG);
+    }
+
+    getLogParserManagerInst().resetFileList();
+    updateFileLists();
+
+    updateNewData(getLogParserManagerInst().getLogs(), true);
+
+    m_date_button->setText(date.toString("yyyy/MM/dd"));
+    m_calender_widget->setVisible(!(m_calender_widget->isVisible()));
+    if (m_proxy_model) {
+        m_proxy_model->setFilterRegExp(QRegExp("[" + QString::number(LOG_LEVEL_LOG) + "]"));
+    }
+
+    m_scrollbar->setValue(0);
+    m_listview->show();
+}
+
+bool LogWidget::logAccessGranted(const int &log_user_type) {
+    if (user_type == NBUS_NS::ORDINARYUSER && ((log_user_type == NBUS_NS::SERVICEUSER) ||
+                                               (log_user_type == NBUS_NS::ORDINARYADMINUSER))) {
+        return false;
+    }
+    if (user_type == NBUS_NS::ORDINARYADMINUSER && log_user_type == NBUS_NS::SERVICEUSER) {
+        return false;
+    }
+    return true;
+}
+
+void LogWidget::updateNewData(const QVector<ItemData *> &items, bool force_update) {
+
+    int sz = items.size();
+    if (force_update) {
+        m_model = new QStandardItemModel();
+    }
+    for (int i = 0; i < sz; i++) {
+        ItemData *item_ptr = items.at(i);
+        if (logAccessGranted(item_ptr->user_type)) {
+            QStandardItem *Item = new QStandardItem;
+            Item->setData(item_ptr->status, Qt::UserRole);
+            Item->setData(QVariant::fromValue(*item_ptr), Qt::UserRole + 1);
+            m_model->appendRow(Item);
+        }
+    }
+    m_proxy_model->setSourceModel(m_model);
+    if (force_update) {
+        m_scrollbar->setValue(0);
+    }
+}
+
+void LogWidget::filterButtonGroupClicked(int) {
+    QString rx = "";
+    if (m_proxy_model) {
+        for (int i = 0; i < LOG_WIDGET_INFO_FILTER_MAX_LEVEL; i++) {
+            if (filter_button[i]->isChecked()) {
+                rx.append(QString::number(i));
+            }
+        }
+        updateFileLists();
+        updateNewData(getLogParserManagerInst().getLogs(), true);
+        m_proxy_model->setFilterRegExp(QRegExp("[" + rx + "]"));
+    }
+
+    m_scrollbar->setValue(0);
+}
+
+void LogWidget::scrollListView(int d) {
+    m_scrollbar->setValue(m_scrollbar->value() + d);
+    if (m_scrollbar->value() == m_scrollbar->maximum()) {
+        updateNewData(getLogParserManagerInst().getLogs(), false);
+    }
+}
+
+LogListViewWidget::LogListViewWidget(LogWidget *parent)
+    : QListView(parent) {
+    m_parent = parent;
+}
+
+LogListViewWidget::~LogListViewWidget() {
+}
+
+void LogListViewWidget::mousePressEvent(QMouseEvent *event) {
+    auto pos = event->pos();
+    presspos = pos;
+    movepos = pos;
+}
+void LogListViewWidget::mouseMoveEvent(QMouseEvent *event) {
+    auto pos = event->pos();
+    int d = pos.y() - movepos.y();
+    m_parent->scrollListView(-d);
+    movepos = pos;
+}
+
+

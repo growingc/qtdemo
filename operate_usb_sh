@@ -1,0 +1,106 @@
+#!/bin/bash
+
+chmod +x $(dirname $0)/umount_usb.sh
+
+. $(dirname $0)/umount_usb.sh
+
+mount_root="/media/usb"
+mount_point="$mount_root/$RANDOM"
+auto_put_passwd="false"
+trolley=""
+package_search_path=""
+trolley_sn=""
+input_dir_list_surgical=("1" "2" "3" "4")
+input_dir_list_master=("1" "2" "3")
+input_dir_list=()
+ignore_src_list=()
+
+while [[ $# -gt 0 ]]; do
+	key="$1"
+    case $key in
+    -h | --help)
+        usage
+        exit
+        ;;
+     -t | --trolley) 
+		if [ "surgical" == "$2" ];then
+          input_dir_list=(${input_dir_list_surgical[@]})
+       else
+          input_dir_list=(${input_dir_list_master[@]})
+       fi     
+		shift
+		shift
+		;;
+	-f | --folder) 
+		trolley_sn=$2
+		shift
+		shift
+		;;  
+	-i | --ignore) 
+      ignore_src_list[${#ignore_src_list[*]}]="$2"
+      index=0
+		for src in ${input_dir_list[@]}
+      do
+       if [ "$src" == "$2" ];then
+          echo $index
+          break
+       else
+          ((index=index+1))
+       fi      
+      done
+      list_len=${#input_dir_list[@]}
+      if [ $index -lt $list_len ];then
+      echo ${input_dir_list[@]}
+      unset input_dir_list[$index]
+      input_dir_list=(${input_dir_list[@]})
+      echo ${input_dir_list[@]}
+      echo ${#input_dir_list[@]}
+      fi 
+		shift
+		shift
+		;;
+    	*)
+		usage
+        	;;
+    esac
+done
+
+function umountRoot()
+{
+	for dir in `ls $mount_root`
+	do
+		umount_usb $mount_root/$dir
+	done
+}
+
+function mount_usb(){
+	local usb_disk_list=($(lsblk -n -o NAME,RM,TYPE -x RM | awk '{if ($2==1 && $3=="part") print $1}'))
+	local mount_usb_state=0
+	if [ ${#usb_disk_list[@]} -eq 0 ]; then
+		echo -e "\033[41;37mUSB not found\033[0m"
+		echo "####[error] USB not found.####"
+	else
+		for usb_disk in ${usb_disk_list[@]}; do
+			umount_usb $mount_point
+			command_auto_put_passwd "sudo mkdir -p $mount_point"
+			command_auto_put_passwd "sudo mount /dev/${usb_disk} $mount_point -o uid=$UID -o gid=`id -g $USER`"
+			if [ $? -eq 0 ]; then
+				package_search_path="$mount_point"
+				cd $package_search_path
+				mkdir "$trolley_sn"
+				cd -
+				package_search_path="$package_search_path"/"${trolley_sn}"
+				copy_to_usb_cmd
+
+				break
+			fi
+		done  
+    fi
+}
+
+function main(){
+	mount_usb
+	sleep 1
+	umount_usb $mount_point
+}
+main

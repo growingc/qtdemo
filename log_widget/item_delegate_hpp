@@ -1,0 +1,160 @@
+
+#ifndef H818DE4BA_84EE_4BBF_9E9C_F148CA384868
+#define H818DE4BA_84EE_4BBF_9E9C_F148CA384868
+
+#include <QStyledItemDelegate>
+#include <QModelIndex>
+#include <QStandardItemModel>
+
+class ItemDelegate : public QStyledItemDelegate {
+    Q_OBJECT
+signals:
+
+public:
+    explicit ItemDelegate(QObject *parent = 0);
+    ~ItemDelegate();
+
+    //重写重画函数
+    void
+    paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const;
+
+private:
+    void initFont();
+    QString autoFeed(QString text) const;
+
+private:
+    QFont m_icon_font_time;
+    QFont m_icon_font_detail;
+};
+
+#endif /*H818DE4BA_84EE_4BBF_9E9C_F148CA384868*/
+
+#include "item_delegate.h"
+
+#include <QPainter>
+#include <QStyledItemDelegate>
+#include <QStyle>
+#include <QEvent>
+#include <QDebug>
+#include "log_item_def.h"
+#include <QCoreApplication>
+#include <QFontDatabase>
+
+ItemDelegate::ItemDelegate(QObject *parent)
+    : QStyledItemDelegate(parent) {
+    initFont();
+}
+
+ItemDelegate::~ItemDelegate() {
+}
+
+void ItemDelegate::paint(QPainter *painter,
+                         const QStyleOptionViewItem &option,
+                         const QModelIndex &index) const {
+    if (index.isValid()) {
+        painter->save();
+
+        QVariant variant = index.data(Qt::UserRole + 1);
+        ItemData data = variant.value<ItemData>();
+
+        QStyleOptionViewItem viewOption(option); //用来在视图中画一个item
+
+        QRectF rect;
+        rect.setX(option.rect.x());
+        rect.setY(option.rect.y());
+        rect.setWidth(option.rect.width() - 1);
+        rect.setHeight(option.rect.height() - 1);
+
+        if (option.state.testFlag(QStyle::State_Selected)) {
+            painter->setPen(QPen(Qt::white));
+            painter->setBrush(QColor(229, 241, 255));
+            painter->drawLine(rect.topLeft(), rect.topRight());
+        } else {
+            painter->setPen(QPen(Qt::white));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawLine(rect.topLeft(), rect.topRight());
+        }
+
+        //绘制数据位置
+        QRect codeRect = QRect();
+        QRect timeRect = QRect();
+        if (data.status != LOG_LEVEL_LOG) {
+            codeRect = QRect(rect.left() + 10, rect.top() + 3, rect.width() - 30, 20);
+            timeRect = QRect(rect.left() + rect.width() / 4, rect.top() + 3, rect.width() - 30, 20);
+        } else {
+            codeRect = QRect(rect.left() + rect.width() / 4, rect.top() + 3, rect.width() - 30,
+                             20); // log 不显示错误码
+            timeRect =
+                QRect(rect.left() + 10, rect.top() + 3, rect.width() - 30, 20); // log 时间顶格显示
+        }
+
+        QRect logRect = QRect(rect.left() + 10, rect.bottom() - 35, rect.width() - 10, 25); //居中
+
+        QRect logRect1 =
+            QRect(rect.left() + 10, rect.bottom() - 47, rect.width() - 10, 25); //第一行
+        QRect logRect2 =
+            QRect(rect.left() + 10, rect.bottom() - 22, rect.width() - 10, 25); //第二行
+
+        painter->setPen(QPen(Qt::white));
+
+        painter->setFont(m_icon_font_time);
+        painter->drawText(timeRect, Qt::AlignLeft, data.time); //绘制时间
+        if (data.status != LOG_LEVEL_LOG) {
+            painter->drawText(codeRect, Qt::AlignLeft, data.error_code); //绘制错误码
+        } else {
+            painter->drawText(codeRect, Qt::AlignLeft, ""); //绘制错误码
+        }
+        painter->setPen(QPen(Qt::white));
+
+        painter->setFont(m_icon_font_detail);
+
+        if (40 < data.log_detail.size()) { //大于40个字符换行显示
+            QString str = autoFeed(data.log_detail);
+            QStringList strl = str.split("\n");
+            painter->drawText(logRect1, Qt::AlignLeft, strl[0]); //绘制详情第一行
+            painter->drawText(logRect2, Qt::AlignLeft, strl[1]); //绘制详情第二行
+        } else {
+            painter->drawText(logRect, Qt::AlignLeft, data.log_detail); //绘制详情居中
+        }
+
+        painter->restore();
+    }
+}
+
+QSize ItemDelegate::sizeHint(const QStyleOptionViewItem &, const QModelIndex &) const {
+    return QSize(590, 72);
+}
+
+void ItemDelegate::initFont() {
+    int fontId = QFontDatabase::addApplicationFont(
+        QString("%1/font/SourceHanSansCN-Medium.otf").arg(QCoreApplication::applicationDirPath()));
+    QString fontName = QFontDatabase::applicationFontFamilies(fontId).at(0);
+    m_icon_font_time = QFont(fontName);
+    m_icon_font_detail = m_icon_font_time;
+    m_icon_font_time.setPixelSize(14);
+    m_icon_font_detail.setPixelSize(14);
+}
+
+QString ItemDelegate::autoFeed(QString text) const {
+    QString strText = text;
+    int AntoIndex = 1;
+    int j = 0;
+    if (!strText.isEmpty()) {
+        for (int i = 0; i < strText.size(); i++) // 40个字符换一行
+        {
+            if (j == 40) {
+                strText.insert(i, "\n");
+                AntoIndex++;
+                i++;
+                j = 0;
+            }
+            if (strText.at(i) == '\n') {
+                AntoIndex++;
+                j = 0;
+            }
+            j++;
+        }
+    }
+    return strText;
+}
